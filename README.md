@@ -1,8 +1,8 @@
 # vynl-audio-streaming
 
-Backend microservice for resolving song names to Apple Music links (Phase 1).
+Backend microservice for resolving song names to Apple Music links and downloading MP3 files (Phase 2 testing).
 
-See [PLAN.md](./PLAN.md) and [docs/PHASE1.md](./docs/PHASE1.md).
+See [PLAN.md](./PLAN.md), [docs/PHASE1.md](./docs/PHASE1.md), and [docs/PHASE2.md](./docs/PHASE2.md).
 
 ## Setup
 
@@ -19,24 +19,45 @@ cp .env.example .env
 uvicorn app.main:app --reload
 ```
 
-## Phase 1 API
+Swagger UI: http://localhost:8000/docs
 
-### Resolve song → Apple Music link
+## Phase 1 — Resolve Apple Music link
 
-```bash
-curl -X POST http://localhost:8000/api/v1/tracks/resolve \
-  -H "Content-Type: application/json" \
-  -d "{\"title\":\"Blinding Lights\",\"artist\":\"The Weeknd\"}"
+```powershell
+Invoke-RestMethod -Method POST -Uri "http://localhost:8000/api/v1/tracks/resolve" `
+  -ContentType "application/json" `
+  -Body '{"title":"Blinding Lights","artist":"The Weeknd"}'
 ```
 
-### Search preview (optional)
+## Phase 2 — Download MP3 (testing)
 
-```bash
-curl "http://localhost:8000/api/v1/tracks/search?title=Blinding%20Lights&artist=The%20Weeknd"
+Step 1 — trigger download:
+
+```powershell
+$r = Invoke-RestMethod -Method POST -Uri "http://localhost:8000/api/v1/tracks/download" `
+  -ContentType "application/json" `
+  -Body '{"title":"Blinding Lights","artist":"The Weeknd"}'
+$r
 ```
 
-### Health
+Step 2 — save the file locally:
 
-```bash
-curl http://localhost:8000/health
+```powershell
+Invoke-WebRequest -Uri "http://localhost:8000$($r.download_url)" -OutFile "test.mp3"
+```
+
+Or download by Apple Music URL directly:
+
+```powershell
+Invoke-RestMethod -Method POST -Uri "http://localhost:8000/api/v1/tracks/download" `
+  -ContentType "application/json" `
+  -Body '{"apple_music_url":"https://music.apple.com/..."}'
+```
+
+**Note:** Phase 2 returns a **file download URL**, not a stream link. Temp stream URLs from Telegram storage come in Phase 4.
+
+## Health
+
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8000/health"
 ```
