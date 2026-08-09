@@ -1,6 +1,8 @@
 # VYNL Audio Streaming Microservice — Plan
 
-**Pure backend service.** No frontend, no user UI, no public Telegram bot. Only other backend services call this API. The calling service receives a temp stream URL and plays audio from that link directly.
+**Pure backend service.** No frontend, no user UI, no public Telegram bot. Only other backend services call this API.
+
+> **Current build target (Phase 1):** Song name → **Apple Music link**. Download, Telegram storage, and streaming come in later phases. See [docs/PHASE1.md](./docs/PHASE1.md).
 
 Plan for `vynl-audio-streaming`, built from two reference codebases:
 
@@ -13,14 +15,17 @@ Plan for `vynl-audio-streaming`, built from two reference codebases:
 
 ## 1. What We're Building
 
-A **backend-only** microservice (FastAPI) that other services talk to over HTTP:
+A **backend-only** microservice (FastAPI) that other services talk to over HTTP.
 
-1. **Ingests** audio — calling service sends **song name** (+ optional artist) → we resolve, download, store
-2. **Stores** in a private Telegram channel (Falix-style) — invisible to end users
-3. **Returns temp stream URLs** (1–2 hr TTL) — calling service uses this URL in its own player
-4. **Regenerates** a new link on request when the old one expires
+**Full vision (all phases):**
 
-The MP3 stays in Telegram permanently. Only the **stream URL** is temporary.
+1. **Resolve** — calling service sends **song name** (+ optional artist) → we return an **Apple Music link**
+2. **Download** — fetch `.mp3` from Apple Music (via aplmate.com)
+3. **Store** in a private Telegram channel (Falix-style)
+4. **Return temp stream URLs** (1–2 hr TTL) for playback
+5. **Regenerate** links when they expire
+
+**Phase 1 stops at step 1** — we only resolve and return the Apple Music URL.
 
 ### Who interacts with what
 
@@ -31,22 +36,48 @@ The MP3 stays in Telegram permanently. Only the **stream URL** is temporary.
 | **End user** | Never touches VYNL directly — only through the calling service |
 | **Telegram** | Internal storage only — not a user-facing bot |
 
-### Typical calling-service flow
+### Typical calling-service flow (full product)
 
 ```
 1. User picks a song in YOUR app
-2. YOUR backend → POST vynl /api/v1/tracks/ingest { title, artist }
-3. VYNL returns { track_id, ... }
-4. YOUR backend → GET vynl /api/v1/tracks/{track_id}/stream-link
-5. VYNL returns { stream_url, expires_at }
-6. YOUR backend passes stream_url to YOUR frontend/player
-7. Player plays: <audio src="stream_url"> or native audio SDK
-8. Link dies after 1–2 hr → YOUR backend requests a new one (step 4)
+2. YOUR backend → POST vynl /api/v1/tracks/resolve { title, artist }     ← Phase 1
+3. VYNL returns { apple_music_url, apple_track_id, title, artist }
+4. YOUR backend → POST vynl /api/v1/tracks/ingest { ... }                ← Phase 3
+5. VYNL downloads, stores in Telegram → { track_id }
+6. YOUR backend → GET vynl /api/v1/tracks/{track_id}/stream-link         ← Phase 4
+7. VYNL returns { stream_url, expires_at }
+8. YOUR player plays stream_url directly
+9. Link expires → request new stream-link (step 6)
+```
+
+### Phase 1 flow (what we build now)
+
+```
+YOUR backend → POST /api/v1/tracks/resolve { "title": "...", "artist": "..." }
+VYNL         → iTunes Search API → pick best match
+VYNL         → { "apple_music_url": "https://music.apple.com/...", ... }
 ```
 
 ---
 
 ## 2. High-Level Architecture
+
+### Phase 1 (current)
+
+```mermaid
+flowchart LR
+    CB[Calling Backend Service]
+    API[FastAPI]
+    RES[iTunes Track Resolver]
+    IT[iTunes Search API]
+
+    CB -->|"POST /resolve {title, artist}"| API
+    API --> RES --> IT
+    RES -->|apple_music_url| API
+    API --> CB
+```
+
+### Full system (later phases)
 
 ```mermaid
 flowchart LR
@@ -55,10 +86,9 @@ flowchart LR
         PL[Your Audio Player]
     end
 
-    subgraph VYNL["vynl-audio-streaming (this service)"]
+    subgraph VYNL["vynl-audio-streaming"]
         API[FastAPI REST API]
         RES[Track Resolver]
-        ING[Ingest Worker]
         DL[Apple Music Downloader]
         TG[Telegram Uploader]
         STR[Byte Streamer]
@@ -69,15 +99,14 @@ flowchart LR
         CH[Private Telegram Channel]
     end
 
-    CB -->|"POST /ingest {title, artist}"| API
+    CB -->|"POST /resolve"| API
+    CB -->|"POST /ingest"| API
     CB -->|"GET /stream-link"| API
-    API -->|stream_url| CB
-    CB -->|stream_url| PL
-    PL -->|"GET /stream/{token}/song.mp3"| STR
-
-    API --> ING --> RES --> DL --> TG --> CH
+    API --> RES
+    API --> DL --> TG --> CH
     TG --> DB
-    STR --> CH
+    CB -->|stream_url| PL
+    PL --> STR --> CH
 ```
 
 ---
@@ -179,21 +208,45 @@ Keep URL ingest as a fallback for playlists/albums or when the caller already ha
 
 ## 5. Core Flows
 
-### Flow A — Ingest (search + download + store)
+### Flow A — Resolve Apple Music link *(Phase 1 — build now)*
+
+```
+POST /api/v1/tracks/resolve
+Body: { "title": "Blinding Lights", "artist": "The Weeknd" }
+```
+
+1. Build search query from `title` + optional `artist`
+2. Call iTunes Search API → get matches
+3. Score and pick best match
+4. Return:
+
+```json
+{
+  "title": "Blinding Lights",
+  "artist": "The Weeknd",
+  "apple_track_id": 1499378106,
+  "apple_music_url": "https://music.apple.com/...",
+  "duration_ms": 200040,
+  "artwork_url": "https://..."
+}
+```
+
+**Phase 1 stops here.**
+
+### Flow B — Ingest (search + download + store) *(Phase 3)*
 
 ```
 POST /api/v1/tracks/ingest
 Body: { "title": "Blinding Lights", "artist": "The Weeknd" }
 ```
 
-1. Build search query from `title` + optional `artist`
-2. Call iTunes Search API → get `trackViewUrl` + `trackId`
-3. Check dedup by `apple_track_id` — if exists, return existing `track_id`
-4. Run `ap.py` flow with resolved URL → download MP3 to temp dir
-5. Upload to private channel via Pyrogram `send_audio()`
-6. Capture `chat_id`, `msg_id`, `file_unique_id[:6]` (hash)
-7. Save track record in MongoDB
-8. Return:
+1. Run Flow A → get `apple_music_url`
+2. Check dedup by `apple_track_id` — if exists, return existing `track_id`
+3. Run `ap.py` flow with resolved URL → download MP3 to temp dir
+4. Upload to private channel via Pyrogram `send_audio()`
+5. Capture `chat_id`, `msg_id`, `file_unique_id[:6]` (hash)
+6. Save track record in MongoDB
+7. Return:
 
 ```json
 {
@@ -201,14 +254,14 @@ Body: { "title": "Blinding Lights", "artist": "The Weeknd" }
   "title": "Blinding Lights",
   "artist": "The Weeknd",
   "apple_track_id": 1499378106,
-  "resolved_url": "https://music.apple.com/...",
+  "apple_music_url": "https://music.apple.com/...",
   "status": "stored"
 }
 ```
 
 **Dedup:** Same `apple_track_id` → skip re-download, return existing `track_id` (even if song name spelling differed).
 
-### Flow B — Issue temp stream link
+### Flow C — Issue temp stream link *(Phase 4)*
 
 ```
 GET /api/v1/tracks/{track_id}/stream-link
@@ -230,7 +283,7 @@ Query: ttl=7200  (optional, default 1–2 hr)
 }
 ```
 
-### Flow C — Stream (play audio)
+### Flow D — Stream (play audio) *(Phase 4)*
 
 ```
 GET /stream/{token}/{filename}.mp3
@@ -243,7 +296,7 @@ Header: Range: bytes=0-  (optional)
 4. Stream via `ByteStreamer` with `Content-Type: audio/mpeg`, `Accept-Ranges: bytes`, **206** for range requests
 5. Do **not** delete the Telegram file — only the token expires
 
-### Flow D — Regenerate link
+### Flow E — Regenerate link *(Phase 4)*
 
 Same as Flow B. Calling service hits `/stream-link` again → new token, new expiry. Old tokens remain invalid after expiry (background cleanup optional).
 
@@ -329,40 +382,43 @@ Indexes: `token` (unique), TTL index on `expires_at` (auto-delete expired tokens
 
 ## 8. API Surface (backend-to-backend only)
 
-All `/api/v1/*` routes require `X-API-Key`. The stream endpoint uses the token as auth (no API key — URL is the secret).
+### Phase 1 endpoints *(build now)*
 
-| Method | Endpoint | Auth | Called by | Description |
-|--------|----------|------|-----------|-------------|
-| `POST` | `/api/v1/tracks/ingest` | API key | Your backend | Resolve song name → download + store |
-| `GET` | `/api/v1/tracks/search` | API key | Your backend | Preview matches before ingest (optional) |
-| `GET` | `/api/v1/tracks/{track_id}` | API key | Your backend | Track metadata |
-| `GET` | `/api/v1/tracks/{track_id}/stream-link` | API key | Your backend | Issue temp playable URL |
-| `GET` | `/stream/{token}/{name}` | Token in URL | Your player | Stream MP3 (Range/seek supported) |
-| `GET` | `/health` | None | Infra/monitoring | Health check |
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `POST` | `/api/v1/tracks/resolve` | none (Phase 5) | Song name → Apple Music link |
+| `GET` | `/api/v1/tracks/search` | none (Phase 5) | Preview iTunes matches (optional) |
+| `GET` | `/health` | none | Health check |
 
-**Stream link response (what your service uses to play):**
-
-```json
-{
-  "stream_url": "https://vynl.example.com/stream/abc123xyz/Blinding-Lights.mp3",
-  "expires_at": "2026-08-09T20:14:00Z",
-  "ttl_seconds": 7200
-}
-```
-
-Your player hits `stream_url` directly — standard HTTP audio stream, works with HTML5 `<audio>`, ExoPlayer, AVPlayer, etc.
-
-**Ingest request body (primary):**
+**Resolve request:**
 
 ```json
 { "title": "Blinding Lights", "artist": "The Weeknd" }
 ```
 
-**Ingest request body (fallback — URL):**
+**Resolve response:**
 
 ```json
-{ "url": "https://music.apple.com/..." }
+{
+  "title": "Blinding Lights",
+  "artist": "The Weeknd",
+  "apple_track_id": 1499378106,
+  "apple_music_url": "https://music.apple.com/us/album/...",
+  "duration_ms": 200000,
+  "artwork_url": "https://is1-ssl.mzstatic.com/..."
+}
 ```
+
+### Later phases
+
+| Method | Endpoint | Phase | Description |
+|--------|----------|-------|-------------|
+| `POST` | `/api/v1/tracks/ingest` | 3 | Resolve + download + store in Telegram |
+| `GET` | `/api/v1/tracks/{track_id}` | 3 | Stored track metadata |
+| `GET` | `/api/v1/tracks/{track_id}/stream-link` | 4 | Issue temp playable URL |
+| `GET` | `/stream/{token}/{name}` | 4 | Stream MP3 (Range/seek) |
+
+API key auth (`X-API-Key`) added in Phase 5.
 
 ---
 
@@ -397,36 +453,44 @@ SECRET_KEY=                          # if signing tokens with JWT instead
 
 ## 10. Implementation Phases
 
-### Phase 1 — Foundation (Week 1)
+### Phase 1 — Resolve Apple Music link *(current)*
 
-- [ ] FastAPI skeleton + config + MongoDB
+- [x] Project scaffold + `/health`
+- [ ] Config (`ITUNES_SEARCH_COUNTRY`, server settings)
 - [ ] `track_resolver.py` — iTunes Search API (song name → Apple Music URL)
+- [ ] `POST /api/v1/tracks/resolve` — return link + metadata
+- [ ] Optional: `GET /api/v1/tracks/search` — preview candidates before picking
+
+**Done when:** Calling service sends song name → gets back `apple_music_url`.
+
+Details: [docs/PHASE1.md](./docs/PHASE1.md)
+
+### Phase 2 — Download MP3
+
 - [ ] Port `ap.py` downloader into `apple_downloader.py`
+- [ ] Apple Music URL → local `.mp3` (single track)
+- [ ] Internal service only (no public endpoint yet, or debug route)
+
+### Phase 3 — Store in Telegram + ingest
+
+- [ ] MongoDB + `tracks` collection
 - [ ] Telegram upload to private channel
-- [ ] `tracks` CRUD + ingest endpoint (title + artist)
-- [ ] Basic health check
+- [ ] `POST /api/v1/tracks/ingest` — resolve + download + store
+- [ ] Dedup by `apple_track_id`
 
-### Phase 2 — Streaming (Week 1–2)
+### Phase 4 — Temp stream links
 
-- [ ] Port `ByteStreamer` + Pyrogram multi-client setup
-- [ ] `GET /stream/{token}/{name}` with range support
-- [ ] Token service + TTL index
-- [ ] `GET /tracks/{id}/stream-link` endpoint
+- [ ] Port Falix `ByteStreamer` + Pyrogram multi-client
+- [ ] Token service + TTL
+- [ ] `GET /api/v1/tracks/{id}/stream-link`
+- [ ] `GET /stream/{token}/{name}` with Range support
 
-### Phase 3 — Production Hardening (Week 2)
+### Phase 5 — Production hardening
 
 - [ ] API key auth middleware
-- [ ] Dedup by Apple Music track ID
-- [ ] Background job: ingest queue (for playlists)
-- [ ] Rate limiting on stream-link generation
+- [ ] Rate limiting
 - [ ] Logging + error handling (FloodWait, aplmate failures)
 - [ ] Docker + deploy config
-
-### Phase 4 — Optional Enhancements
-
-- [ ] Webhook callback to calling service when ingest completes
-- [ ] Batch ingest endpoint for multiple tracks
-- [ ] Rate limiting per API key
 
 ---
 
@@ -474,8 +538,15 @@ SECRET_KEY=                          # if signing tokens with JWT instead
 
 ## 14. Success Criteria
 
-1. Calling service ingests by song name → track stored within ~30–60s
-2. Calling service gets `stream_url` → plays audio directly in its player (with seek)
-3. Link expires after 1–2 hr → calling service requests new link, playback continues
-4. Same song re-ingested → dedup, no re-download
-5. End users never interact with VYNL — only with the calling service
+### Phase 1 (current)
+
+1. Calling service sends `{ title, artist }` → gets valid `apple_music_url`
+2. Wrong/unknown song → clear `404`
+3. Response includes resolved `title`, `artist`, `apple_track_id` so caller can verify match
+
+### Full product (all phases)
+
+1. Resolve → download → store in Telegram
+2. Calling service gets temp `stream_url` → plays with seek
+3. Link expires → new link on request
+4. End users never touch VYNL directly
