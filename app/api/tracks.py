@@ -7,7 +7,6 @@ from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
 from app.config import settings
-from app.config import settings
 from app.exceptions import (
     DownloadError,
     MultiTrackError,
@@ -19,7 +18,7 @@ from app.models.track import (
     ResolveResponse,
     SearchCandidate,
 )
-from app.services import telegram_storage, track_resolver
+from app.services import track_resolver
 from app.services.apple_downloader import download_track
 
 router = APIRouter(tags=["tracks"])
@@ -54,18 +53,11 @@ async def search_tracks(
 @router.post("/tracks/download")
 async def download_track_route(body: DownloadRequest) -> FileResponse:
     """
-    Resolve (if needed) → download MP3 → upload to Telegram → return the file.
+    Resolve (if needed) → download MP3 → return the file directly.
 
-    Temp stream URLs come from Telegram in Phase 4. This endpoint returns the
-    raw MP3 file directly for testing.
+    Telegram storage and temp stream URLs come in later phases.
     """
     apple_music_url = body.apple_music_url
-
-    if not settings.telegram_configured():
-        raise HTTPException(
-            status_code=503,
-            detail="Telegram not configured. Add API_ID, API_HASH, BOT_TOKEN, STORAGE_CHANNEL_ID to .env",
-        )
 
     try:
         if not apple_music_url:
@@ -83,28 +75,15 @@ async def download_track_route(body: DownloadRequest) -> FileResponse:
                 download_track(apple_music_url, tmp_dir),
                 timeout=settings.DOWNLOAD_TIMEOUT,
             )
-            telegram_ref = await telegram_storage.upload_audio(
-                audio_path=result.audio_path,
-                title=result.title,
-                filename=result.filename,
-                thumb_path=result.thumb_path,
-            )
         except Exception:
             _cleanup_temp_dir(tmp_dir)
             raise
-
-        headers = {
-            "X-Apple-Music-Url": apple_music_url,
-            "X-Telegram-Chat-Id": telegram_ref.chat_id,
-            "X-Telegram-Msg-Id": str(telegram_ref.msg_id),
-            "X-Telegram-File-Hash": telegram_ref.hash,
-        }
 
         return FileResponse(
             path=result.audio_path,
             media_type="audio/mpeg",
             filename=result.filename,
-            headers=headers,
+            headers={"X-Apple-Music-Url": apple_music_url},
             background=BackgroundTask(_cleanup_temp_dir, tmp_dir),
         )
     except asyncio.TimeoutError as exc:
@@ -118,5 +97,3 @@ async def download_track_route(body: DownloadRequest) -> FileResponse:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except DownloadError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc

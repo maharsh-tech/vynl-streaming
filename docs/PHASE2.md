@@ -1,19 +1,8 @@
 # Phase 2 — Implementation Plan
 
-**Scope:** Download `.mp3` from Apple Music → **upload to Telegram** → return file directly for testing.
+**Scope:** Download `.mp3` from Apple Music → **return file directly** for testing.
 
-**Goal:** Verify resolve → download → Telegram upload. Temp stream URLs come in Phase 4.
-
----
-
-## What Phase 2 is (and is not)
-
-| Phase 2 IS | Phase 2 is NOT |
-|------------|----------------|
-| Download MP3 from aplmate | Temp stream URLs (Phase 4) |
-| Upload to private Telegram channel | MongoDB / ingest API (Phase 3) |
-| Return `.mp3` file directly on POST | Token-based local file cache |
-| Testing playback + Telegram storage | Production stream delivery |
+**Not in Phase 2:** Telegram upload, temp stream URLs, MongoDB.
 
 ### Flow
 
@@ -21,12 +10,10 @@
 flowchart LR
     A[Song name or URL] --> B[Resolve]
     B --> C[Download MP3]
-    C --> D[Upload to Telegram]
-    D --> E["POST response: .mp3 file"]
-    D --> F["Phase 4: stream URL from Telegram"]
+    C --> D["POST response: .mp3 file"]
 ```
 
-**Phase 4** will issue temp stream URLs that read from Telegram — not from local disk.
+Telegram storage → Phase 3. Temp stream URLs from Telegram → Phase 4.
 
 ---
 
@@ -35,18 +22,10 @@ flowchart LR
 ### POST `/api/v1/tracks/download`
 
 1. Resolve (if needed)
-2. Download MP3
-3. Upload to Telegram channel
-4. **Return the MP3 file** (`Content-Type: audio/mpeg`)
+2. Download MP3 from aplmate
+3. **Return the MP3 file** (`Content-Type: audio/mpeg`)
 
-Response headers include Telegram refs for debugging:
-- `X-Telegram-Chat-Id`
-- `X-Telegram-Msg-Id`
-- `X-Apple-Music-Url`
-
-**No** `download_url` token. **No** GET file route.
-
-Takes **10–30 seconds** — Swagger will show loading until complete.
+Takes **10–30 seconds** — Swagger shows loading until the file is ready.
 
 ---
 

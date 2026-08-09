@@ -1,6 +1,6 @@
 # vynl-audio-streaming
 
-Backend microservice: resolve song names → download MP3 → store in Telegram.
+Backend microservice: resolve song names → download MP3 (Phase 2 testing).
 
 See [PLAN.md](./PLAN.md), [docs/PHASE1.md](./docs/PHASE1.md), and [docs/PHASE2.md](./docs/PHASE2.md).
 
@@ -12,17 +12,6 @@ venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env
 ```
-
-Fill in `.env` with Telegram credentials (required for download):
-
-```env
-API_ID=
-API_HASH=
-BOT_TOKEN=
-STORAGE_CHANNEL_ID=-100xxxxxxxxxx
-```
-
-Bot must be **admin** in your private storage channel.
 
 ## Run
 
@@ -40,18 +29,13 @@ Invoke-RestMethod -Method POST -Uri "http://localhost:8000/api/v1/tracks/resolve
   -Body '{"title":"Blinding Lights","artist":"The Weeknd"}'
 ```
 
-## Phase 2 — Download + Telegram upload (testing)
+## Phase 2 — Download MP3 (testing)
 
-`POST /api/v1/tracks/download` will:
+`POST /api/v1/tracks/download` resolves (if needed), downloads the MP3, and **returns the file directly**.
 
-1. Resolve song (if no `apple_music_url` given)
-2. Download MP3 from aplmate
-3. Upload to your private Telegram channel
-4. **Return the MP3 file directly** (browser/Swagger downloads it)
+No Telegram. No temp stream URLs yet — those come in later phases.
 
-Temp **stream URLs** from Telegram come in Phase 4 — not in this phase.
-
-**Swagger:** use `POST /api/v1/tracks/download` with:
+**Swagger:** `POST /api/v1/tracks/download`:
 
 ```json
 {
@@ -60,15 +44,9 @@ Temp **stream URLs** from Telegram come in Phase 4 — not in this phase.
 }
 ```
 
-Or with URL only:
+Takes **10–30 seconds** — wait for it to finish, then the file downloads.
 
-```json
-{
-  "apple_music_url": "https://music.apple.com/us/album/daylight/..."
-}
-```
-
-**PowerShell** (saves file):
+**PowerShell:**
 
 ```powershell
 Invoke-WebRequest -Method POST -Uri "http://localhost:8000/api/v1/tracks/download" `
@@ -76,10 +54,6 @@ Invoke-WebRequest -Method POST -Uri "http://localhost:8000/api/v1/tracks/downloa
   -Body '{"title":"Daylight","artist":"David Kushner"}' `
   -OutFile "daylight.mp3"
 ```
-
-Response headers include Telegram storage refs: `X-Telegram-Chat-Id`, `X-Telegram-Msg-Id`.
-
-Download usually takes **10–30 seconds** — wait for it to finish.
 
 ## Health
 
