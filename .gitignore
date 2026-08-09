@@ -23,6 +23,7 @@ Thumbs.db
 log.txt
 tmp/
 temp/
+.download_cache/
 
 # Pyrogram session files
 *.session
