@@ -308,9 +308,9 @@ Phase 1 is complete when:
 
 | Phase | Work |
 |-------|------|
-| **Phase 2** | Port `ap.py` — download MP3 from Apple Music URL |
+| **Phase 2** | Download MP3 — file download route for testing (not stream URLs) |
 | **Phase 3** | Telegram storage + `POST /ingest` + MongoDB |
-| **Phase 4** | Temp stream links + byte-range streaming |
+| **Phase 4** | Temp stream URLs from Telegram + byte-range streaming |
 | **Phase 5** | API keys, rate limits, Docker |
 
 Do not start Phase 2 until resolve is stable and tested.

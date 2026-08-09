@@ -2,7 +2,7 @@
 
 **Pure backend service.** No frontend, no user UI, no public Telegram bot. Only other backend services call this API.
 
-> **Current build target (Phase 1):** Song name → **Apple Music link**. Download, Telegram storage, and streaming come in later phases. See [docs/PHASE1.md](./docs/PHASE1.md).
+> **Current build target (Phase 2):** Download `.mp3` for testing only. Stream URLs from Telegram come in Phase 4. See [docs/PHASE2.md](./docs/PHASE2.md).
 
 Plan for `vynl-audio-streaming`, built from two reference codebases:
 
@@ -382,7 +382,7 @@ Indexes: `token` (unique), TTL index on `expires_at` (auto-delete expired tokens
 
 ## 8. API Surface (backend-to-backend only)
 
-### Phase 1 endpoints *(build now)*
+### Phase 1 endpoints *(done)*
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
@@ -390,22 +390,25 @@ Indexes: `token` (unique), TTL index on `expires_at` (auto-delete expired tokens
 | `GET` | `/api/v1/tracks/search` | none (Phase 5) | Preview iTunes matches (optional) |
 | `GET` | `/health` | none | Health check |
 
-**Resolve request:**
+### Phase 2 endpoints *(current — MP3 file download for testing)*
 
-```json
-{ "title": "Blinding Lights", "artist": "The Weeknd" }
-```
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/tracks/download` | Resolve + download MP3, return file metadata |
+| `GET` | `/api/v1/tracks/download/file/{token}` | Return `.mp3` file (temporary test route) |
 
-**Resolve response:**
+**Important:** Phase 2 `download_url` is a **file download link**, not the final stream URL. Final temp stream URLs (`/stream/{token}/{name}`) are generated from **Telegram-stored files** in Phase 4.
+
+**Download response (Phase 2):**
 
 ```json
 {
   "title": "Blinding Lights",
-  "artist": "The Weeknd",
-  "apple_track_id": 1499378106,
-  "apple_music_url": "https://music.apple.com/us/album/...",
-  "duration_ms": 200000,
-  "artwork_url": "https://is1-ssl.mzstatic.com/..."
+  "filename": "Blinding Lights.mp3",
+  "file_size": 5242880,
+  "apple_music_url": "https://music.apple.com/...",
+  "download_url": "/api/v1/tracks/download/file/abc123",
+  "expires_at": "2026-08-09T19:00:00Z"
 }
 ```
 
@@ -415,8 +418,8 @@ Indexes: `token` (unique), TTL index on `expires_at` (auto-delete expired tokens
 |--------|----------|-------|-------------|
 | `POST` | `/api/v1/tracks/ingest` | 3 | Resolve + download + store in Telegram |
 | `GET` | `/api/v1/tracks/{track_id}` | 3 | Stored track metadata |
-| `GET` | `/api/v1/tracks/{track_id}/stream-link` | 4 | Issue temp playable URL |
-| `GET` | `/stream/{token}/{name}` | 4 | Stream MP3 (Range/seek) |
+| `GET` | `/api/v1/tracks/{track_id}/stream-link` | 4 | Issue temp stream URL from Telegram file |
+| `GET` | `/stream/{token}/{name}` | 4 | Stream MP3 from Telegram (Range/seek) |
 
 API key auth (`X-API-Key`) added in Phase 5.
 
@@ -453,23 +456,28 @@ SECRET_KEY=                          # if signing tokens with JWT instead
 
 ## 10. Implementation Phases
 
-### Phase 1 — Resolve Apple Music link *(current)*
+### Phase 1 — Resolve Apple Music link *(done)*
 
 - [x] Project scaffold + `/health`
-- [ ] Config (`ITUNES_SEARCH_COUNTRY`, server settings)
-- [ ] `track_resolver.py` — iTunes Search API (song name → Apple Music URL)
-- [ ] `POST /api/v1/tracks/resolve` — return link + metadata
-- [ ] Optional: `GET /api/v1/tracks/search` — preview candidates before picking
-
-**Done when:** Calling service sends song name → gets back `apple_music_url`.
+- [x] Config (`ITUNES_SEARCH_COUNTRY`, server settings)
+- [x] `track_resolver.py` — iTunes Search API (song name → Apple Music URL)
+- [x] `POST /api/v1/tracks/resolve` — return link + metadata
+- [x] `GET /api/v1/tracks/search` — preview candidates
 
 Details: [docs/PHASE1.md](./docs/PHASE1.md)
 
-### Phase 2 — Download MP3
+### Phase 2 — Download MP3 *(current — testing only)*
 
 - [ ] Port `ap.py` downloader into `apple_downloader.py`
 - [ ] Apple Music URL → local `.mp3` (single track)
-- [ ] Internal service only (no public endpoint yet, or debug route)
+- [ ] `POST /api/v1/tracks/download` — trigger download, return metadata
+- [ ] `GET /api/v1/tracks/download/file/{token}` — return `.mp3` file for testing
+
+**Phase 2 gives a file download, NOT a stream link.** This is temporary so we can verify aplmate download works before Telegram storage.
+
+**Not in Phase 2:** Telegram, MongoDB, temp stream URLs, byte-range streaming.
+
+Details: [docs/PHASE2.md](./docs/PHASE2.md)
 
 ### Phase 3 — Store in Telegram + ingest
 
@@ -478,12 +486,14 @@ Details: [docs/PHASE1.md](./docs/PHASE1.md)
 - [ ] `POST /api/v1/tracks/ingest` — resolve + download + store
 - [ ] Dedup by `apple_track_id`
 
-### Phase 4 — Temp stream links
+### Phase 4 — Temp stream links *(from Telegram storage)*
 
 - [ ] Port Falix `ByteStreamer` + Pyrogram multi-client
-- [ ] Token service + TTL
-- [ ] `GET /api/v1/tracks/{id}/stream-link`
-- [ ] `GET /stream/{token}/{name}` with Range support
+- [ ] Token service + TTL (1–2 hr self-destruct)
+- [ ] `GET /api/v1/tracks/{id}/stream-link` — issue playable URL
+- [ ] `GET /stream/{token}/{name}` — stream MP3 from Telegram with Range support
+
+**This is where the real stream URLs come from** — generated from files stored in the private Telegram channel, not from local disk.
 
 ### Phase 5 — Production hardening
 
