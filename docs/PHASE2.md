@@ -1,10 +1,8 @@
 # Phase 2 — Implementation Plan
 
-**Scope:** Download `.mp3` from Apple Music via aplmate.com — **for testing only**.
+**Scope:** Download `.mp3` from Apple Music → **upload to Telegram** → return file directly for testing.
 
-**Goal:** Verify the full resolve → download pipeline works before adding Telegram storage.
-
-Reference: [PLAN.md](../PLAN.md) | Builds on: [PHASE1.md](./PHASE1.md)
+**Goal:** Verify resolve → download → Telegram upload. Temp stream URLs come in Phase 4.
 
 ---
 
@@ -12,70 +10,23 @@ Reference: [PLAN.md](../PLAN.md) | Builds on: [PHASE1.md](./PHASE1.md)
 
 | Phase 2 IS | Phase 2 is NOT |
 |------------|----------------|
-| Download MP3 to local temp storage | Store files in Telegram |
-| Return `.mp3` file via a download route | Generate temp stream URLs |
-| Temporary test mechanism | Production playback delivery |
-| Verify aplmate download works | MongoDB / ingest / dedup |
+| Download MP3 from aplmate | Temp stream URLs (Phase 4) |
+| Upload to private Telegram channel | MongoDB / ingest API (Phase 3) |
+| Return `.mp3` file directly on POST | Token-based local file cache |
+| Testing playback + Telegram storage | Production stream delivery |
 
-### How this fits the full product
+### Flow
 
 ```mermaid
 flowchart LR
-    subgraph phase1 [Phase 1 - done]
-        A[Song name] --> B[Apple Music URL]
-    end
-
-    subgraph phase2 [Phase 2 - now]
-        B --> C[Download MP3]
-        C --> D["GET /download/file/token → .mp3 file"]
-    end
-
-    subgraph phase3 [Phase 3 - later]
-        C --> E[Upload to Telegram channel]
-        E --> F[Save chat_id + msg_id in MongoDB]
-    end
-
-    subgraph phase4 [Phase 4 - later]
-        F --> G["GET /stream-link → temp URL"]
-        G --> H["GET /stream/token → audio from Telegram"]
-    end
+    A[Song name or URL] --> B[Resolve]
+    B --> C[Download MP3]
+    C --> D[Upload to Telegram]
+    D --> E["POST response: .mp3 file"]
+    D --> F["Phase 4: stream URL from Telegram"]
 ```
 
-**Final product:** Calling service gets a **temp stream URL** (1–2 hr TTL) that plays audio **from Telegram storage** (Phase 4).
-
-**This phase:** Calling service gets a **file download URL** that returns the raw `.mp3` so we can test download quality and playback before wiring Telegram.
-
----
-
-## Phase 2 deliverables
-
-| # | Deliverable | Done when |
-|---|-------------|-----------|
-| 1 | Port aplmate client | Apple Music URL → CDN MP3 URL |
-| 2 | Port download helpers | CDN URL → local `.mp3` file |
-| 3 | `apple_downloader` service | `download_track(url)` returns file path + metadata |
-| 4 | Temp file cache | Short-lived token → local file (replaced in Phase 3) |
-| 5 | Download API | POST trigger + GET file route |
-| 6 | Error handling | 404 / 422 / 502 for clear failure cases |
-
----
-
-## Suggested commit order
-
-```
-1.  docs: add phase 2 implementation plan
-2.  chore: add beautifulsoup4 dependency
-3.  feat: add download-related exceptions
-4.  feat: add download pydantic models
-5.  feat: port aplmate client and link resolution
-6.  feat: add mp3 file download helpers
-7.  feat: add apple_downloader service
-8.  feat: add in-memory download file cache
-9.  feat: add tracks download and file routes
-10. docs: update readme with phase 2 testing examples
-```
-
-Push after each commit.
+**Phase 4** will issue temp stream URLs that read from Telegram — not from local disk.
 
 ---
 
@@ -83,39 +34,19 @@ Push after each commit.
 
 ### POST `/api/v1/tracks/download`
 
-Trigger resolve (if needed) + download. Returns metadata and a **file download URL** (not a stream link).
+1. Resolve (if needed)
+2. Download MP3
+3. Upload to Telegram channel
+4. **Return the MP3 file** (`Content-Type: audio/mpeg`)
 
-**Request (song name):**
-```json
-{ "title": "Blinding Lights", "artist": "The Weeknd" }
-```
+Response headers include Telegram refs for debugging:
+- `X-Telegram-Chat-Id`
+- `X-Telegram-Msg-Id`
+- `X-Apple-Music-Url`
 
-**Request (direct URL):**
-```json
-{ "apple_music_url": "https://music.apple.com/..." }
-```
+**No** `download_url` token. **No** GET file route.
 
-**Response 200:**
-```json
-{
-  "title": "Blinding Lights",
-  "artist": "The Weeknd",
-  "filename": "Blinding Lights.mp3",
-  "file_size": 5242880,
-  "apple_track_id": 1499378106,
-  "apple_music_url": "https://music.apple.com/...",
-  "download_url": "/api/v1/tracks/download/file/abc123xyz",
-  "expires_at": "2026-08-09T19:00:00Z"
-}
-```
-
-### GET `/api/v1/tracks/download/file/{token}`
-
-Returns the `.mp3` file (`Content-Type: audio/mpeg`).
-
-- This is a **file download** for Phase 2 testing
-- Token expires after ~15 min; temp file deleted
-- **Not** the same as Phase 4 `/stream/{token}/{name}` which streams from Telegram
+Takes **10–30 seconds** — Swagger will show loading until complete.
 
 ---
 

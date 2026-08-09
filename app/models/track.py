@@ -1,5 +1,3 @@
-from datetime import datetime
-
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -38,15 +36,3 @@ class DownloadRequest(BaseModel):
         if self.title and self.title.strip():
             return self
         raise ValueError("Provide title or apple_music_url")
-
-
-class DownloadResponse(BaseModel):
-    title: str
-    artist: str | None
-    filename: str
-    file_size: int
-    apple_track_id: int | None
-    apple_music_url: str
-    download_url: str
-    expires_at: datetime
-    artwork_url: str | None = None

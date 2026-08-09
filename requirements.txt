@@ -4,3 +4,5 @@ python-dotenv
 httpx
 pydantic
 beautifulsoup4
+pyrogram
+# tgcrypto  # optional speedup; requires MSVC on Windows

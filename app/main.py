@@ -1,25 +1,19 @@
-import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
 from app.api.tracks import router as tracks_router
-from app.services import download_cache
-
-_cleanup_task: asyncio.Task | None = None
+from app.config import settings
+from app.services import telegram_storage
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _cleanup_task
-    _cleanup_task = asyncio.create_task(download_cache.run_cleanup_loop())
+    if settings.telegram_configured():
+        await telegram_storage.start_client()
     yield
-    if _cleanup_task:
-        _cleanup_task.cancel()
-        try:
-            await _cleanup_task
-        except asyncio.CancelledError:
-            pass
+    if settings.telegram_configured():
+        await telegram_storage.stop_client()
 
 
 app = FastAPI(title="vynl-audio-streaming", lifespan=lifespan)
