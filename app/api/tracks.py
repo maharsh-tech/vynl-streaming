@@ -16,6 +16,10 @@ from app.exceptions import (
     StorageError,
     TrackNotFoundError,
 )
+from app.models.track import (
+    IngestRequest,
+    IngestResponse,
+    ResolveRequest,
     ResolveResponse,
     SearchCandidate,
     StreamLinkResponse,
