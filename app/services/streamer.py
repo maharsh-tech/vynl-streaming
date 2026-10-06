@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from typing import AsyncGenerator
 
-from app.services.telegram_uploader import _client
+from app.services import telegram_uploader
 
 # Pyrogram/wzgram chunks are exactly 1 MiB
 CHUNK_SIZE = 1 * 1024 * 1024
@@ -42,7 +42,7 @@ async def stream_audio(
     Yield audio bytes from a Telegram message.
     Optimized: skips to the exact 1MB chunk instead of downloading the whole file to RAM.
     """
-    client = _client  # type: ignore[assignment]
+    client = telegram_uploader._client  # type: ignore[assignment]
     if client is None or not client.is_connected:
         raise RuntimeError("Telegram client not connected")
 
