@@ -87,6 +87,12 @@ async def insert_token(token: str, track_id: str, expires_at: datetime) -> None:
 async def find_valid_token(token: str) -> dict | None:
     """Returns token doc only if not expired (TTL index may not fire instantly)."""
     doc = await _get_db()["stream_tokens"].find_one({"token": token}, {"_id": 0})
-    if doc and doc["expires_at"] > _now():
-        return doc
+    if doc:
+        # PyMongo returns UTC datetimes as naive by default; make it aware for comparison
+        expires_at = doc["expires_at"]
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+            
+        if expires_at > _now():
+            return doc
     return None

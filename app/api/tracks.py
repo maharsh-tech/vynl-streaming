@@ -16,15 +16,9 @@ from app.exceptions import (
     StorageError,
     TrackNotFoundError,
 )
-from app.models.track import (
-    DownloadRequest,
-    IngestRequest,
-    IngestResponse,
-    ResolveRequest,
     ResolveResponse,
     SearchCandidate,
     StreamLinkResponse,
-    TrackInfoResponse,
 )
 from app.services import track_resolver
 from app.services.apple_downloader import download_track
@@ -66,53 +60,6 @@ async def search_tracks(
             detail=f"No Apple Music matches for: {title}",
         )
     return results
-
-
-# ── Phase 2 ───────────────────────────────────────────────────────────────────
-
-@router.post("/tracks/download")
-async def download_track_route(body: DownloadRequest) -> FileResponse:
-    """Resolve (if needed) → download MP3 → return the file directly (testing only)."""
-    apple_music_url = body.apple_music_url
-
-    try:
-        if not apple_music_url:
-            if not body.title or not body.title.strip():
-                raise HTTPException(
-                    status_code=400,
-                    detail="Provide title or apple_music_url",
-                )
-            resolved = await track_resolver.resolve_track(body.title, body.artist)
-            apple_music_url = resolved.apple_music_url
-
-        tmp_dir = tempfile.mkdtemp(prefix="vynl-dl-")
-        try:
-            result = await asyncio.wait_for(
-                download_track(apple_music_url, tmp_dir),
-                timeout=settings.DOWNLOAD_TIMEOUT,
-            )
-        except Exception:
-            _cleanup_temp_dir(tmp_dir)
-            raise
-
-        return FileResponse(
-            path=result.audio_path,
-            media_type="audio/mpeg",
-            filename=result.filename,
-            headers={"X-Apple-Music-Url": apple_music_url},
-            background=BackgroundTask(_cleanup_temp_dir, tmp_dir),
-        )
-    except asyncio.TimeoutError as exc:
-        raise HTTPException(
-            status_code=504,
-            detail=f"Download timed out after {settings.DOWNLOAD_TIMEOUT}s",
-        ) from exc
-    except TrackNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except MultiTrackError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except DownloadError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 # ── Phase 3: Ingest ───────────────────────────────────────────────────────────
@@ -248,19 +195,6 @@ async def ingest_track(body: IngestRequest) -> IngestResponse:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except (StorageError, RuntimeError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-
-@router.get("/tracks/{track_id}", response_model=TrackInfoResponse)
-async def get_track(track_id: str) -> TrackInfoResponse:
-    try:
-        _require_storage()
-    except ServiceUnavailableError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-    doc = await mongo.find_track_by_id(track_id)
-    if not doc:
-        raise HTTPException(status_code=404, detail=f"Track not found: {track_id}")
-    return TrackInfoResponse(**doc)
 
 
 # ── Phase 4: Stream link ──────────────────────────────────────────────────────

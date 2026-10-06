@@ -1,6 +1,6 @@
 # vynl-audio-streaming
 
-Backend microservice: resolve song names → download MP3 (Phase 2 testing).
+Backend microservice for Vynl: resolves song names → downloads MP3 → uploads to Telegram → proxies playback via an optimized ByteStreamer.
 
 See [PLAN.md](./PLAN.md), [docs/PHASE1.md](./docs/PHASE1.md), and [docs/PHASE2.md](./docs/PHASE2.md).
 
@@ -12,6 +12,7 @@ venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env
 ```
+Fill in the Telegram credentials and MongoDB URI in `.env`.
 
 ## Run
 
@@ -19,41 +20,20 @@ cp .env.example .env
 uvicorn app.main:app --reload
 ```
 
-Swagger UI: http://localhost:8000/docs
+Interactive Swagger UI: http://localhost:8000/docs
 
-## Phase 1 — Resolve Apple Music link
+## Features / Endpoints
 
-```powershell
-Invoke-RestMethod -Method POST -Uri "http://localhost:8000/api/v1/tracks/resolve" `
-  -ContentType "application/json" `
-  -Body '{"title":"Blinding Lights","artist":"The Weeknd"}'
-```
-
-## Phase 2 — Download MP3 (testing)
-
-`POST /api/v1/tracks/download` resolves (if needed), downloads the MP3, and **returns the file directly**.
-
-No Telegram. No temp stream URLs yet — those come in later phases.
-
-**Swagger:** `POST /api/v1/tracks/download`:
-
-```json
-{
-  "title": "Daylight",
-  "artist": "David Kushner"
-}
-```
-
-Takes **10–30 seconds** — wait for it to finish, then the file downloads.
-
-**PowerShell:**
-
-```powershell
-Invoke-WebRequest -Method POST -Uri "http://localhost:8000/api/v1/tracks/download" `
-  -ContentType "application/json" `
-  -Body '{"title":"Daylight","artist":"David Kushner"}' `
-  -OutFile "daylight.mp3"
-```
+*   **`GET /api/v1/tracks/search`**: Search Apple Music by title/artist to get candidate matches.
+*   **`POST /api/v1/tracks/resolve`**: Select a track to resolve exact metadata without downloading.
+*   **`POST /api/v1/tracks/ingest`**: Provide a title/artist or an Apple Music URL. The backend will:
+    1. Resolve the track.
+    2. Check MongoDB for a dedup hit (returns instantly if already stored).
+    3. Download the track from Apple Music (if new).
+    4. Upload to a private Telegram Storage Channel (if new).
+    5. Save the metadata and Telegram `file_id` in MongoDB.
+*   **`GET /api/v1/tracks/{track_id}/stream-link`**: Retrieve a secure, time-limited URL for a stored track.
+*   **`GET /stream/{token}/{filename}`**: The highly optimized `ByteStreamer` endpoint. It uses Pyrogram's chunk-offsetting to proxy bytes directly from Telegram to the client without buffering large files in memory, providing instant playback seeking.
 
 ## Health
 
