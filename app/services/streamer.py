@@ -10,13 +10,13 @@ Upgrade: add MULTI_TOKEN bot pool (Falix pattern) if throughput is insufficient.
 """
 from __future__ import annotations
 
-import io
 import re
 from typing import AsyncGenerator
 
 from app.services.telegram_uploader import _client
 
-CHUNK_SIZE = 1 * 1024 * 1024  # 1 MB
+# Pyrogram/wzgram chunks are exactly 1 MiB
+CHUNK_SIZE = 1 * 1024 * 1024
 
 
 def _parse_range(range_header: str | None, file_size: int) -> tuple[int, int]:
@@ -40,7 +40,7 @@ async def stream_audio(
 ) -> AsyncGenerator[bytes, None]:
     """
     Yield audio bytes from a Telegram message.
-    Downloads via download_media into BytesIO, then slices for Range.
+    Optimized: skips to the exact 1MB chunk instead of downloading the whole file to RAM.
     """
     client = _client  # type: ignore[assignment]
     if client is None or not client.is_connected:
@@ -53,18 +53,20 @@ async def stream_audio(
     file_size: int = msg.audio.file_size
     start, end = _parse_range(range_header, file_size)
 
-    # Download to in-memory buffer
-    # ponytail: downloads entire file to RAM for range slicing.
-    # Ceiling: large files (>100 MB) will be slow + memory-heavy.
-    # Upgrade: use Pyrogram's internal get_file iterator with offset param.
-    buf = io.BytesIO()
-    await client.download_media(msg, file_name=buf)
-    buf.seek(start)
+    first_chunk_index = start // CHUNK_SIZE
+    skip_bytes_in_first_chunk = start % CHUNK_SIZE
+    bytes_to_send = end - start + 1
 
-    remaining = end - start + 1
-    while remaining > 0:
-        chunk = buf.read(min(CHUNK_SIZE, remaining))
-        if not chunk:
+    # stream_media's offset is in CHUNKS, not bytes.
+    async for chunk in client.stream_media(msg, offset=first_chunk_index):
+        if skip_bytes_in_first_chunk > 0:
+            chunk = chunk[skip_bytes_in_first_chunk:]
+            skip_bytes_in_first_chunk = 0
+            
+        if len(chunk) >= bytes_to_send:
+            yield chunk[:bytes_to_send]
             break
+            
         yield chunk
-        remaining -= len(chunk)
+        bytes_to_send -= len(chunk)
+
