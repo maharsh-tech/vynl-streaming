@@ -35,6 +35,27 @@ Interactive Swagger UI: http://localhost:8000/docs
 *   **`GET /api/v1/tracks/{track_id}/stream-link`**: Retrieve a secure, time-limited URL for a stored track.
 *   **`GET /stream/{token}/{filename}`**: The highly optimized `ByteStreamer` endpoint. It uses Pyrogram's chunk-offsetting to proxy bytes directly from Telegram to the client without buffering large files in memory, providing instant playback seeking.
 
+## Testing (PowerShell)
+
+You can test the entire ingestion and streaming flow from the terminal.
+
+### 1. Ingest a Track
+```powershell
+$body = @{ title = "Blinding Lights"; artist = "The Weeknd" } | ConvertTo-Json
+$response = Invoke-RestMethod -Method POST -Uri "http://localhost:8000/api/v1/tracks/ingest" `
+  -ContentType "application/json" -Body $body
+$response
+```
+
+### 2. Get a Stream Link
+Copy the `track_id` from the previous response:
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8000/api/v1/tracks/{track_id}/stream-link"
+```
+
+### 3. Stream the Audio
+Copy the `stream_url` from the previous response and paste it into your browser!
+
 ## Health
 
 ```powershell
