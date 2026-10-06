@@ -4,3 +4,6 @@ python-dotenv
 httpx
 pydantic
 beautifulsoup4
+motor
+wzgram
+# tgcrypto  # optional crypto speedup; skip on Windows if MSVC not installed
